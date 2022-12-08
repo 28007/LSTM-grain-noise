@@ -1,0 +1,156 @@
+% this code help to finish tasks below:
+% 1. load a HMC data and do TFM
+% 2. for each channel, calculate the flight time IN and OUT of the ROI square
+% 3. valid the correction of the time index chosen
+% dist_ROI, time_ROI: a m*n*64 numeric array storing the distance or time from all elements to each pixels
+% s_time_index, l_time_index: the IN time or OUT time of each channel 
+
+clear all
+close all
+
+datafile='HMC grain noise\Grain_03mm_id_6_Crack_1mm_2_5MHz_64elts_ref_wideband.mat'; %load data
+load(datafile);
+
+exp_data2.ph_velocity = 5759; %use this velocity for all simulation cases
+
+x_size=90; % in mm  计算区域大小
+z_size=55; % in mm
+options=fn_options_TFM_orig(x_size,z_size);
+mode='recalc_and_process';
+display_data=fn_1contact_tfm_wrapper(exp_data2, options, mode);
+x=display_data.x(:);
+z=display_data.z(:);
+[X,Z]=meshgrid(x,z);     % 计算区域大小
+display_data.f = abs(display_data.f );
+max_amp = max(max(display_data.f));
+display_data.f = display_data.f / max(max(display_data.f)) ;
+
+figure;
+display_data2.f = 20 * log10(display_data.f);
+surf(1000.*X,1000.*Z,(display_data2.f));
+shading flat
+view(2)
+xlabel('Distance (mm)','Fontsize', 18), ylabel('Distance (mm)','Fontsize', 18)
+caxis([-40, 0]), hc = colorbar;
+title(hc, 'dB')
+set(gca,'Ydir','reverse', 'FontSize', 16)
+axis equal
+axis([-35 35 0 50])     % 显示区域大小
+colormap(jet)
+
+%Defecr coordinate
+defect_x = 0; %mm
+defect_z = 20.5;
+
+size_ROI = 1.5; %mm
+hold on 
+plot([defect_x - size_ROI defect_x - size_ROI], [defect_z - size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x + size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x - size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z - size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x - size_ROI defect_x + size_ROI], [defect_z + size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+
+% find part2 preparing to predict
+x1_ind = min([find(x > (defect_x - size_ROI)/1000)]); 
+x2_ind = max([find(x < (defect_x + size_ROI)/1000)]); 
+z1_ind = min([find(z > (defect_z - size_ROI)/1000)]);  
+z2_ind = max([find(z < (defect_z + size_ROI)/1000)]); 
+
+ROI_X = X(z1_ind:z2_ind, x1_ind:x2_ind);
+ROI_Z = Z(z1_ind:z2_ind, x1_ind:x2_ind);
+
+dist_ROI = zeros(size(ROI_X, 1), size(ROI_X, 2), length(exp_data2.array.el_xc));
+for i = 1:length(exp_data2.array.el_xc)
+    dist_ROI(:, :, i) = sqrt((ROI_X - exp_data2.array.el_xc(i)) .^2 + (ROI_Z - exp_data2.array.el_zc(i)) .^2);
+end
+time_ROI = dist_ROI ./ exp_data2.ph_velocity;
+
+
+hmc_tx = exp_data2.tx;
+hmc_rx = exp_data2.rx;
+chanl_num = (length(exp_data2.array.el_xc)+1).* length(exp_data2.array.el_xc)*0.5;
+s_time = [];
+l_time = [];
+for i = 1:chanl_num
+    fly_time = [];
+    for r  = 1 : size(ROI_X, 1)-1 : size(ROI_X, 1)   % the top and bottom edge
+        for c = 1:size(ROI_X, 2)
+            time = time_ROI(r, c, hmc_tx(i)) + time_ROI(r, c, hmc_rx(i));
+            fly_time = [fly_time time];  % for a certain channel, calc fly time corresponding to all pixels
+        end
+    end
+    s_time = [s_time min(fly_time)];
+    l_time = [l_time max(fly_time)];    % find the max or min time for every channel
+end
+
+
+% calc and save the longest&shortest time-index of each certain channel
+% saved channel information: hmc_rx, hmx_tx, l_time, s_time, l_time_index,
+% s_time_index, diff_index  FOR each channel(2080)
+dt = exp_data2.time(2) - exp_data2.time(1);
+l_time_index = ceil(l_time ./ dt);
+s_time_index = floor(s_time ./ dt);
+diff_index = l_time_index - s_time_index +1; % both steps corresponding the 
+%l_time_index and s_time_index should be predicted
+
+chanl_inf.hmc_rx = hmc_rx;
+chanl_inf.hmx_tx = hmc_tx;
+chanl_inf.l_time = l_time;
+chanl_inf.s_time = s_time;
+chanl_inf.l_time_index = l_time_index;
+chanl_inf.s_time_index = s_time_index;
+chanl_inf.diff_index = diff_index;
+
+chinf_save_path = 'C:\Users\Administrator\Desktop\晶粒噪声克服\single feature';
+save(strcat(chinf_save_path,'\','chanl_inf.mat'),'chanl_inf');
+
+% validation of the choice of time index
+for i=1:chanl_num
+    exp_data2.time_data(s_time_index(i):l_time_index(i),i) = 0;
+end
+
+display_data=fn_1contact_tfm_wrapper(exp_data2, options, mode);
+x=display_data.x(:);
+z=display_data.z(:);
+[X,Z]=meshgrid(x,z);     % 计算区域大小
+display_data.f = abs(display_data.f );
+max_amp = max(max(display_data.f));
+display_data.f = display_data.f / max(max(display_data.f)) ;
+display_data.f = 20 * log10(display_data.f);
+
+figure;
+surf(1000.*X,1000.*Z,(display_data.f));
+shading flat
+view(2)
+xlabel('Distance (mm)','Fontsize', 18), ylabel('Distance (mm)','Fontsize', 18)
+caxis([-40, 0]), hc = colorbar;
+title(hc, 'dB')
+set(gca,'Ydir','reverse', 'FontSize', 16)
+axis equal
+axis([-35 35 0 50])     % 显示区域大小
+colormap(jet)
+
+hold on 
+plot([defect_x - size_ROI defect_x - size_ROI], [defect_z - size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x + size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x - size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z - size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x - size_ROI defect_x + size_ROI], [defect_z + size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+
+figure
+dis = abs(display_data.f-display_data2.f);
+dis = dis/max(max(dis));
+dis = 20 * log10(dis);
+surf(1000.*X, 1000.*Z, dis);
+shading flat
+view(2)
+xlabel('Distance (mm)','Fontsize', 18), ylabel('Distance (mm)','Fontsize', 18)
+caxis([-40, 0]), hc = colorbar;
+title(hc, 'dB')
+set(gca,'Ydir','reverse', 'FontSize', 16)
+axis equal
+axis([-35 35 0 50])     % 显示区域大小
+colormap(jet)
+hold on
+plot([defect_x - size_ROI defect_x - size_ROI], [defect_z - size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x + size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x - size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z - size_ROI], 'k', 'LineWidth', 2)
+plot([defect_x - size_ROI defect_x + size_ROI], [defect_z + size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
