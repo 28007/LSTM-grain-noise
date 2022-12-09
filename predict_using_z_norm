@@ -1,0 +1,148 @@
+% using z-score normalization to the train and valid data
+clear
+
+chanl_inf = load('chanl_inf.mat').chanl_inf;
+train_str = 'C:\Users\Administrator\Desktop\晶粒噪声克服\single feature\train data';
+train_file = dir(strcat(train_str,'\*.mat'));
+numsample = size(train_file,1);
+numascan = 2080;
+
+s_time_index = chanl_inf.s_time_index;
+l_time_index = chanl_inf.l_time_index;
+create_ndataset = 1;
+
+
+if create_ndataset == 1
+    fmc_data = [];
+    fmc_l_time_ind = [];  % save the end timestep
+    fmc_pred_ts = []; % save the timesteps need to be predicted
+    for n = 1:numsample
+        file_name = train_file(n).name;
+        datafile = fullfile(train_str,file_name);
+        exp_data = load(datafile).exp_data2;
+    
+         % STEP 2
+        fmc_data = [fmc_data exp_data.time_data];
+        fmc_l_time_ind = [fmc_l_time_ind chanl_inf.l_time_index];
+        
+    end
+    
+    % STEP 3
+    idx = randperm(numascan*numsample);
+    for i = 1:numsample*numascan
+        fmc_data2(:,i) = fmc_data(:,idx(i));
+        fmc_l_time_ind2(i) = fmc_l_time_ind(idx(i));  % inner timestep should be predicted
+    end
+    
+    for i = 1:numsample*numascan
+        data{i,1} = fmc_data2(1:fmc_l_time_ind2(i)-1,i)';
+    end
+    
+    % STEP 4
+    numObservations = numel(data);
+    idxTrain = 1:floor(0.9*numObservations);
+    idxValid = floor(0.9*numObservations)+1:numObservations;
+    
+    dataTrain = data(idxTrain);
+    dataValid = data(idxValid);
+
+    dataset.filename = train_file;
+    dataset.dataTrain = dataTrain;
+    dataset.dataValid = dataValid;
+    dataset.maxval = max(max(fmc_data));
+    dataset.minval = min(min(fmc_data));
+    
+    save('dataset.mat','dataset');
+else
+    load('dataset.mat')
+    dataTrain = dataset.dataTrain;
+    dataValid = dataset.dataValid;
+    maxval = dataset.maxval;
+    minval = dataset.minval;
+end
+
+XTrain = cell(numel(dataTrain),1);
+TTrain = cell(numel(dataTrain),1);
+XValid = cell(numel(dataValid),1);
+TValid = cell(numel(dataValid),1);
+
+for n = 1:numel(dataTrain)
+    X = dataTrain{n};
+    XTrain{n} = X(:,1:end-1);
+    TTrain{n} = X(:,2:end);
+end
+
+% STEP 5
+% sort train data
+numObservations = numel(XTrain);
+for i=1:numObservations
+    sequence = XTrain{i};
+    sequenceLengths(i) = size(sequence,2);
+end
+
+[sequenceLengths,idx] = sort(sequenceLengths);
+XTrain = XTrain(idx);
+TTrain = TTrain(idx);
+
+% STEP 6
+% normalization for train
+muX = mean(cat(2, XTrain{:}),2); % cat把一个个cell里边的内容拼接起来
+sigmaX = std(cat(2, XTrain{:}),0,2);
+
+muT = mean(cat(2, TTrain{:}),2);
+sigmaT = std(cat(2, TTrain{:}),0,2);
+
+normalization.muX = muX;
+normalization.sigmaX = sigmaX;
+normalization.muT = muT;
+normalization.sigmaT = sigmaT;
+
+save('normalization.mat',"normalization");
+
+for n = 1:numel(XTrain)
+    XTrain{n} = (XTrain{n}-muX) ./ sigmaX;
+    TTrain{n} = (TTrain{n}-muT) ./ sigmaT;
+end
+
+% normalization for valid
+for n = 1:numel(dataValid)
+    X = dataValid{n};
+    XValid{n} = X(:,1:end-1);
+    TValid{n} = X(:,2:end);
+end
+
+for n = 1:numel(XValid)
+    XValid{n} = (XValid{n} - muX) ./ sigmaX;
+    TValid{n} = (TValid{n} - muT) ./ sigmaT;
+end
+
+
+numHiddenUnits1=128;
+numChannels = 1;
+
+layers = [
+    sequenceInputLayer(numChannels)
+    bilstmLayer(numHiddenUnits1,StateActivationFunction="softsign")
+    fullyConnectedLayer(50)
+    dropoutLayer(0.2)
+    fullyConnectedLayer(numChannels)
+    regressionLayer];
+
+options = trainingOptions("adam",...
+    MaxEpochs=20,...
+    GradientThreshold=1,...
+    MiniBatchSize=32,...
+    InitialLearnRate=0.005,...
+    LearnRateSchedule="piecewise",...
+    LearnRateDropPeriod=15,...
+    LearnRateDropFactor=0.2,...
+    Shuffle='never',...
+    Plots='training-progress',...
+    ValidationData={XValid,TValid},...
+    ValidationFrequency=100,...
+    L2Regularization=0.001,...
+    Verbose=0);
+
+net = trainNetwork(XTrain,TTrain,layers,options);
+
+save('net.mat',"net");
