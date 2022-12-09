@@ -11,7 +11,7 @@ close all
 datafile='HMC grain noise\Grain_03mm_id_6_Crack_1mm_2_5MHz_64elts_ref_wideband.mat'; %load data
 load(datafile);
 
-exp_data2.ph_velocity = 5759; %use this velocity for all simulation cases
+exp_data2.ph_velocity = 5582; %use this velocity for all simulation cases
 
 x_size=90; % in mm  计算区域大小
 z_size=55; % in mm
@@ -50,10 +50,10 @@ plot([defect_x - size_ROI defect_x + size_ROI], [defect_z - size_ROI defect_z - 
 plot([defect_x - size_ROI defect_x + size_ROI], [defect_z + size_ROI defect_z + size_ROI], 'k', 'LineWidth', 2)
 
 % find part2 preparing to predict
-x1_ind = min([find(x > (defect_x - size_ROI)/1000)]); 
-x2_ind = max([find(x < (defect_x + size_ROI)/1000)]); 
-z1_ind = min([find(z > (defect_z - size_ROI)/1000)]);  
-z2_ind = max([find(z < (defect_z + size_ROI)/1000)]); 
+x1_ind = max([find(x < (defect_x - size_ROI)/1000)]); 
+x2_ind = min([find(x > (defect_x + size_ROI)/1000)]); 
+z1_ind = max([find(z < (defect_z - size_ROI)/1000)]);  
+z2_ind = min([find(z > (defect_z + size_ROI)/1000)]); 
 
 ROI_X = X(z1_ind:z2_ind, x1_ind:x2_ind);
 ROI_Z = Z(z1_ind:z2_ind, x1_ind:x2_ind);
